@@ -48,7 +48,9 @@ def build_input_fruit_top(input_file):
                 current_fruit_item = amount_by_fruit.get(fruit, FruitItem(fruit, 0))
                 amount_by_fruit[fruit] = current_fruit_item + new_fruit_item
 
-        return sorted(amount_by_fruit.values())
+        fruit_top = sorted(amount_by_fruit.values())
+        fruit_top.reverse()
+        return fruit_top
     except Exception as e:
         logging.error(e)
         raise ClientValidationError("Couldn't build input file fruit top")
@@ -99,15 +101,19 @@ def verify_client_output(top_size, client_service):
         raise ClientValidationError("Mistmatch in expected and received fruit tops")
 
     if top_size != len(received_fruit_top):
-        raise ClientValidationError(f"Mistmatch in expected and received fruit tops length {len(received_fruit_top)}/{top_size}")
+        raise ClientValidationError(
+            f"Mistmatch in expected and received fruit tops length {len(received_fruit_top)}/{top_size}"
+        )
 
     logging.info("OK")
+
 
 def find_top_size(services):
     for service in services.values():
         top_size = find_environment_variable(service["environment"], "TOP_SIZE")
         if top_size:
             return int(top_size)
+
 
 def main():
     logging.basicConfig(level=logging.INFO)
@@ -117,7 +123,11 @@ def main():
             parsed_docker_compose_file = yaml.safe_load(docker_compose_file)
             services = parsed_docker_compose_file["services"]
             client_services_name = list(
-                filter(lambda service_key: "client" in services[service_key]["build"]["dockerfile"], services.keys())
+                filter(
+                    lambda service_key: "client"
+                    in services[service_key]["build"]["dockerfile"],
+                    services.keys(),
+                )
             )
             top_size = find_top_size(services)
             logging.info("Awaiting client containers to exit...")

@@ -13,6 +13,7 @@ AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 
+
 class AggregationFilter:
 
     def __init__(self):
@@ -25,24 +26,26 @@ class AggregationFilter:
         self.fruit_top = []
 
     def _process_data(self, fruit, amount):
-        logging.info(f"Processing data message")
+        logging.info("Processing data message")
         for i in range(len(self.fruit_top)):
             if self.fruit_top[i].fruit == fruit:
-                self.fruit_top[i] =  self.fruit_top[i] + fruit_item.FruitItem(fruit, amount)
+                self.fruit_top[i] = self.fruit_top[i] + fruit_item.FruitItem(
+                    fruit, amount
+                )
                 return
         bisect.insort(self.fruit_top, fruit_item.FruitItem(fruit, amount))
 
     def _process_eof(self):
-        logging.info(f"Received EOF")
+        logging.info("Received EOF")
+        fruit_chunk = list(self.fruit_top[-TOP_SIZE:])
+        fruit_chunk.reverse()
         fruit_top = list(
             map(
                 lambda fruit_item: (fruit_item.fruit, fruit_item.amount),
-                self.fruit_top,
+                fruit_chunk,
             )
         )
-        self.output_queue.send(
-            message_protocol.internal.serialize(fruit_top[:TOP_SIZE])
-        )
+        self.output_queue.send(message_protocol.internal.serialize(fruit_top))
         del self.fruit_top
 
     def process_messsage(self, message, ack, nack):

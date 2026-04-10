@@ -16,8 +16,8 @@ class FruitItem:
 
     def __lt__(self, other):
         if self.amount == other.amount:
-            return self.fruit > other.fruit
-        return self.amount > other.amount
+            return self.fruit < other.fruit
+        return self.amount < other.amount
 
     def __str__(self):
         return f"{self.fruit:16} {self.amount:5d}"

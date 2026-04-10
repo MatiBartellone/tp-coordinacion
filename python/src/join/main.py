@@ -12,6 +12,7 @@ AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 TOP_SIZE = int(os.environ["TOP_SIZE"])
 
+
 class JoinFilter:
 
     def __init__(self):
@@ -23,11 +24,9 @@ class JoinFilter:
         )
 
     def process_messsage(self, message, ack, nack):
-        logging.info(f"Received top")
+        logging.info("Received top")
         fruit_top = message_protocol.internal.deserialize(message)
-        self.output_queue.send(
-            message_protocol.internal.serialize(fruit_top)
-        )
+        self.output_queue.send(message_protocol.internal.serialize(fruit_top))
         ack()
 
     def start(self):
