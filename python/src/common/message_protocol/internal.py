@@ -6,6 +6,7 @@ import json
 TYPE_DATA = "data"
 TYPE_EOF = "eof"
 TYPE_SUM_EOF = "sum_eof"
+TYPE_AGG_EOF = "agg_eof"
 TYPE_PARTIAL = "partial"
 TYPE_RESULT = "result"
 
@@ -45,6 +46,10 @@ def make_eof_msg(client_id):
 
 def make_sum_eof_msg(client_id):
     return {_KEY_TYPE: TYPE_SUM_EOF, _KEY_CLIENT: client_id}
+
+
+def make_agg_eof_msg(client_id, sum_id):
+    return {_KEY_TYPE: TYPE_AGG_EOF, _KEY_CLIENT: client_id, _KEY_SUM_ID: sum_id}
 
 
 def make_partial_msg(client_id, agg_id, fruit_top):
