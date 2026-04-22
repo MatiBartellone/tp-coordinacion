@@ -73,13 +73,21 @@ class MessageMiddlewareQueueRabbitMQ(MessageMiddlewareQueue):
                 "Se perdio la conexion al intentar enviar a la cola"
             )
 
-    def start_consuming(self, on_message_callback):
+    def start_consuming(self, on_message_callback, control_callback=None, control_queue=None):
+        self.channel.basic_qos(prefetch_count=1)
         wrapped = _build_delivery_callback(on_message_callback)
         self.channel.basic_consume(
             queue=self.queue_name,
             on_message_callback=wrapped,
             auto_ack=False,
         )
+        if control_callback and control_queue:
+            wrapped_control = _build_delivery_callback(control_callback)
+            self.channel.basic_consume(
+                queue=control_queue,
+                on_message_callback=wrapped_control,
+                auto_ack=False,
+            )
         self.channel.start_consuming()
 
     def stop_consuming(self):
@@ -121,16 +129,28 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
                 "Se perdio la conexion al intentar publicar en el exchange"
             )
 
-    def start_consuming(self, on_message_callback):
-        result = self.channel.queue_declare(queue='', exclusive=True, auto_delete=True)
-        self.bound_queue = result.method.queue
+    def get_queue_name(self):
+        """Declara una cola vinculada al exchange y retorna su nombre.
 
+        Esto permite que otro middleware (ej. Queue) consuma de esta cola
+        en su propio event loop, evitando la necesidad de threads.
+        La cola es auto_delete (se borra al quedar sin consumidores)
+        pero no exclusive (puede consumirse desde otra conexion).
+        """
+        result = self.channel.queue_declare(queue='', exclusive=False, auto_delete=True)
+        self.bound_queue = result.method.queue
         for key in self.routing_keys:
             self.channel.queue_bind(
                 exchange=self.exchange_name,
                 queue=self.bound_queue,
                 routing_key=key,
             )
+        return self.bound_queue
+
+    def start_consuming(self, on_message_callback):
+        self.channel.basic_qos(prefetch_count=1)
+        if not hasattr(self, 'bound_queue'):
+            self.get_queue_name()
 
         wrapped = _build_delivery_callback(on_message_callback)
         self.channel.basic_consume(

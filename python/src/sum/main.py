@@ -1,7 +1,6 @@
 import os
 import logging
 import signal
-import threading
 
 from common import middleware, message_protocol, fruit_item
 
@@ -13,10 +12,8 @@ SUM_PREFIX = os.environ["SUM_PREFIX"]
 AGGREGATION_AMOUNT = int(os.environ["AGGREGATION_AMOUNT"])
 AGGREGATION_PREFIX = os.environ["AGGREGATION_PREFIX"]
 
-# Exchange fanout para notificar EOF a todas las instancias de Sum.
+# Exchange para notificar EOF a todas las instancias de Sum.
 SUM_EOF_EXCHANGE = "sum_eof_fanout"
-# Routing key unica — en un fanout se ignora, pero la usamos como binding
-# para que cada instancia reciba todas las notificaciones.
 SUM_EOF_KEY = "eof"
 
 
@@ -33,10 +30,12 @@ class SumFilter:
         )
 
         # Exchange para recibir la señal de EOF de los demas Sums.
-        # Cada instancia crea su propia cola exclusiva -> todas reciben la copia.
+        # Obtenemos el nombre de la cola exclusiva para consumirla desde
+        # el mismo event loop que la work queue (sin necesidad de threads).
         self.eof_consumer = middleware.MessageMiddlewareExchangeRabbitMQ(
             MOM_HOST, SUM_EOF_EXCHANGE, [SUM_EOF_KEY]
         )
+        self.eof_queue_name = self.eof_consumer.get_queue_name()
 
         # Un exchange por cada Aggregator, con routing key especifico.
         self.agg_exchanges = []
@@ -51,6 +50,12 @@ class SumFilter:
         self.flushed = set()        # client_ids ya vaciados por este Sum
 
     # --- Procesamiento de datos ---
+
+    def _get_aggregation_id(self, fruit):
+        """Calcula el indice del Aggregator destino.
+        Se usa hash() builtin, que es deterministico entre todas las
+        instancias de Sum porque el Dockerfile fija PYTHONHASHSEED=0."""
+        return hash(fruit) % AGGREGATION_AMOUNT
 
     def _accumulate(self, client_id, fruit, amount):
         """Acumula la cantidad para una fruta de un cliente."""
@@ -68,9 +73,9 @@ class SumFilter:
 
         by_fruit = self.fruits_by_client.pop(client_id, {})
 
-        # Enviar cada fruta al Aggregator determinado por hash.
+        # Enviar cada fruta al Aggregator determinado por hash deterministico.
         for item in by_fruit.values():
-            agg_idx = hash(item.fruit) % AGGREGATION_AMOUNT
+            agg_idx = self._get_aggregation_id(item.fruit)
             msg = message_protocol.internal.make_data_msg(
                 client_id, item.fruit, item.amount
             )
@@ -109,7 +114,7 @@ class SumFilter:
         ack()
 
     def _on_eof_broadcast(self, message, ack, nack):
-        """Callback para mensajes del exchange fanout de EOF entre Sums."""
+        """Callback para mensajes del exchange de EOF entre Sums."""
         parsed = message_protocol.internal.deserialize(message)
         mtype = message_protocol.internal.msg_type(parsed)
 
@@ -119,27 +124,19 @@ class SumFilter:
         ack()
 
     def start(self):
-        # Thread para consumir del exchange de EOF.
-        # Justificacion GIL: ambos threads son I/O-bound (bloqueados en pika
-        # socket.recv), asi que el GIL no interfiere con el paralelismo.
-        eof_thread = threading.Thread(
-            target=self.eof_consumer.start_consuming,
-            args=(self._on_eof_broadcast,),
-            daemon=True,
+        # Consumo de ambas colas en un solo event loop (single thread).
+        # La work queue de datos y la cola del exchange de EOF se consumen
+        # en el mismo channel -> no se necesitan threads ni locks.
+        self.data_queue.start_consuming(
+            self._on_data,
+            control_callback=self._on_eof_broadcast,
+            control_queue=self.eof_queue_name,
         )
-        eof_thread.start()
-
-        # Consumo principal de la work queue de datos (bloqueante).
-        self.data_queue.start_consuming(self._on_data)
 
     def shutdown(self):
         logging.info("Shutting down Sum %d", ID)
         try:
             self.data_queue.stop_consuming()
-        except Exception:
-            pass
-        try:
-            self.eof_consumer.stop_consuming()
         except Exception:
             pass
         try:
